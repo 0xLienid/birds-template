@@ -1,0 +1,11 @@
+export const CONFIG = {
+  PORT: 3200,
+  QUEUE_DB_PATH: "./data/queue",
+  OBSERVER_DB_PATH: "./data/observer",
+  POLL_INTERVAL_MS: 250,
+  BASE_DELAY_MS: 1000,
+  MAX_RETRIES: 3,
+  DEFAULT_METRICS_WINDOW_MS: 3 * 60 * 60 * 1000,
+  FAILURE_RATE_THRESHOLD: 0.5,
+  TIMESTAMP_PAD_LENGTH: 15,
+} as const;

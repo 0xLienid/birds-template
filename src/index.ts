@@ -1,24 +1,97 @@
-import express from 'express';
-import { open } from 'lmdb';
+import express, { type Express } from "express";
+import { Queue } from "./lib/queue.js";
+import { Observer } from "./observer/observer.js";
+import { ActionType, toJobId } from "./lib/types.js";
+import { CONFIG } from "./lib/config.js";
 
-const app = express();
-const port = 3200;
+export function createApp(queue: Queue, observer: Observer): Express {
+  const app = express();
 
-const db = open({ path: './data' });
-const KEY = 'message';
+  app.use(express.json());
 
-if (db.get(KEY) === undefined) {
-  db.put(KEY, 'hello world');
+  app.use((req, _res, next) => {
+    observer.log(ActionType.API_REQUEST, "log", {
+      method: req.method,
+      path: req.path,
+      query: req.query,
+      body: req.body as Record<string, unknown>,
+    });
+    next();
+  });
+
+  app.post("/bird", (req, res) => {
+    const { name } = req.body as { name?: string };
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "Missing required field: name" });
+      return;
+    }
+
+    const { job, isDuplicate } = queue.submitJob({ name });
+
+    if (isDuplicate) {
+      observer.log(ActionType.JOB_DUPLICATE, "log", {
+        jobId: job.id,
+        name: job.name,
+        currentStatus: job.status,
+      });
+      res.status(200).json({
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        createdAt: job.createdAt,
+      });
+    } else {
+      observer.log(ActionType.JOB_SUBMITTED, "log", {
+        jobId: job.id,
+        name: job.name,
+      });
+      res.status(201).json({
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        createdAt: job.createdAt,
+      });
+    }
+  });
+
+  app.get("/bird", (req, res) => {
+    const name = req.query.name as string | undefined;
+    if (!name) {
+      res.status(400).json({ error: "Missing required query parameter: name" });
+      return;
+    }
+
+    const jobId = toJobId(name);
+    const job = queue.getJob(jobId);
+
+    if (!job || job.status !== "completed") {
+      res.status(404).json({ error: "Not found or not completed" });
+      return;
+    }
+
+    res.json({
+      id: job.id,
+      name: job.name,
+      status: job.status,
+      createdAt: job.createdAt,
+      body: job.body,
+    });
+  });
+
+  app.get("/metrics", (req, res) => {
+    const windowParam = req.query.window as string | undefined;
+    const windowMs = windowParam ? parseInt(windowParam, 10) : undefined;
+    const metrics = observer.getMetrics(windowMs);
+    res.json(metrics);
+  });
+
+  return app;
 }
 
-app.use(express.json());
+const queue = new Queue(CONFIG.QUEUE_DB_PATH);
+const observer = new Observer(CONFIG.OBSERVER_DB_PATH);
+const app = createApp(queue, observer);
 
-app.get('/', (req, res) => {
-  const text = db.get(KEY) as string;
-  res.send(text);
+app.listen(CONFIG.PORT, () => {
+  console.log(`Server running at http://localhost:${CONFIG.PORT}`);
 });
-
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
-
