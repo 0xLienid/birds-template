@@ -84,6 +84,66 @@ describe("Queue", () => {
     });
   });
 
+  describe("queueIndex ordering", () => {
+    it("claims jobs in submission order", () => {
+      queue.submitJob({ name: "Brown Pelican" });
+      queue.submitJob({ name: "Bald Eagle" });
+      queue.submitJob({ name: "Snowy Owl" });
+
+      expect(queue.claimJob()!.id).toBe("brown-pelican");
+      expect(queue.claimJob()!.id).toBe("bald-eagle");
+      expect(queue.claimJob()!.id).toBe("snowy-owl");
+      expect(queue.claimJob()).toBeUndefined();
+    });
+
+    it("claims a fresh job before a retried job with future availability", () => {
+      queue.submitJob({ name: "Brown Pelican" });
+      queue.claimJob();
+      queue.retryJob("brown-pelican", Date.now() + 60000);
+
+      queue.submitJob({ name: "Bald Eagle" });
+
+      const claimed = queue.claimJob();
+      expect(claimed).toBeDefined();
+      expect(claimed!.id).toBe("bald-eagle");
+
+      expect(queue.claimJob()).toBeUndefined();
+    });
+
+    it("claims the retried job once its availability time arrives", () => {
+      queue.submitJob({ name: "Brown Pelican" });
+      queue.claimJob();
+
+      queue.retryJob("brown-pelican", Date.now() - 1);
+
+      const claimed = queue.claimJob();
+      expect(claimed).toBeDefined();
+      expect(claimed!.id).toBe("brown-pelican");
+      expect(claimed!.retryCount).toBe(1);
+    });
+
+    it("claims a resubmitted failed job immediately", () => {
+      queue.submitJob({ name: "Brown Pelican" });
+      queue.claimJob();
+      queue.failJob("brown-pelican");
+
+      queue.submitJob({ name: "Bald Eagle" });
+
+      queue.submitJob({ name: "Brown Pelican" });
+
+      const first = queue.claimJob();
+      const second = queue.claimJob();
+
+      expect(first).toBeDefined();
+      expect(first!.id).toBe("bald-eagle");
+
+      expect(second).toBeDefined();
+      expect(second!.id).toBe("brown-pelican");
+
+      expect(queue.claimJob()).toBeUndefined();
+    });
+  });
+
   describe("completeJob", () => {
     it("marks a job as completed with body", () => {
       queue.submitJob({ name: "Brown Pelican" });
